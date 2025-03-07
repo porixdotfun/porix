@@ -8,6 +8,7 @@
 [![X](https://img.shields.io/badge/X-000000?logo=x&logoColor=white)](https://twitter.com/porixdotfun)
 [![Website](https://img.shields.io/badge/Website-FF7139?logo=firefox-browser&logoColor=white)](https://porix.fun)
 [![GitHub](https://img.shields.io/badge/GitHub-181717?logo=github&logoColor=white)](https://github.com/porixdotfun/porix)
+
 Porix is an AI-powered prediction and betting platform on Solana blockchain, allowing users to bet on cryptocurrency prices, NFT floor prices, and other market metrics.
 
 ## Overview
