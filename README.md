@@ -1,6 +1,6 @@
 ![Porix Logo](/porix.png)
 
-[![License: MIT](/LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](/LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Solana](https://img.shields.io/badge/Solana-Compatible-9945FF.svg)](https://solana.com/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-4EA94B?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
