@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+
 load_dotenv()
 
 
@@ -31,12 +31,12 @@ class Config:
 
     # AI Model settings
     MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ai/models")
-    MODEL_TRAINING_INTERVAL = int(os.getenv("MODEL_TRAINING_INTERVAL", "86400"))  # 24 hours in seconds
+    MODEL_TRAINING_INTERVAL = int(os.getenv("MODEL_TRAINING_INTERVAL", "86400"))
 
     # Prediction settings
-    MIN_BET_AMOUNT = float(os.getenv("MIN_BET_AMOUNT", "1"))  # Minimum amount of PORIX tokens to place a bet
-    MAX_BET_AMOUNT = float(os.getenv("MAX_BET_AMOUNT", "10000"))  # Maximum amount of PORIX tokens to place a bet
-    REWARD_MULTIPLIER = float(os.getenv("REWARD_MULTIPLIER", "1.8"))  # Reward multiplier for successful predictions
+    MIN_BET_AMOUNT = float(os.getenv("MIN_BET_AMOUNT", "1"))
+    MAX_BET_AMOUNT = float(os.getenv("MAX_BET_AMOUNT", "10000"))
+    REWARD_MULTIPLIER = float(os.getenv("REWARD_MULTIPLIER", "1.8"))
 
     # User reputation settings
     REPUTATION_NFT_COLLECTION = os.getenv("REPUTATION_NFT_COLLECTION")
@@ -71,12 +71,10 @@ class ProductionConfig(Config):
     LOG_LEVEL = "WARNING"
 
 
-# Set config based on environment
 config_dict = {
     "development": DevelopmentConfig,
     "testing": TestingConfig,
     "production": ProductionConfig,
 }
 
-# Get configuration class based on environment variable or default to development
 CONFIG = config_dict[os.getenv("FLASK_ENV", "development")]
