@@ -5,7 +5,7 @@
 [![Solana](https://img.shields.io/badge/Solana-Compatible-9945FF.svg)](https://solana.com/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-4EA94B?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
 [![Flask](https://img.shields.io/badge/Flask-000000?logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
-[![Twitter](https://img.shields.io/badge/Twitter-1DA1F2?logo=twitter&logoColor=white)](https://twitter.com/porixdotfun)
+[![X](https://img.shields.io/badge/X-000000?logo=x&logoColor=white)](https://twitter.com/porixdotfun)
 [![Website](https://img.shields.io/badge/Website-FF7139?logo=firefox-browser&logoColor=white)](https://porix.fun)
 [![GitHub](https://img.shields.io/badge/GitHub-181717?logo=github&logoColor=white)](https://github.com/porixdotfun)
 
