@@ -1,260 +1,319 @@
+import hashlib
+import base64
+import jwt
 from datetime import datetime, timedelta
+from solana.publickey import PublicKey
 
-from blockchain.nft_manager import NFTManager
-from db.repositories import BetRepository, UserRepository
+from blockchain.solana_client import SolanaClient
+from blockchain.token_manager import TokenManager
+from db.repositories import UserRepository
+from api.middleware import generate_token
 from utils.logging import get_logger
+from utils.security import verify_signature
 from config import CONFIG
 
 logger = get_logger(__name__)
 
 
-class ReputationService:
-    """Service for managing user reputation and NFTs"""
+class UserService:
+    """Service for managing users"""
 
-    def __init__(self, nft_manager=None, bet_repo=None, user_repo=None):
-        self.nft_manager = nft_manager or NFTManager()
-        self.bet_repo = bet_repo or BetRepository()
+    def __init__(self, user_repo=None, solana_client=None, token_manager=None):
         self.user_repo = user_repo or UserRepository()
+        self.solana_client = solana_client or SolanaClient()
+        self.token_manager = token_manager or TokenManager(self.solana_client)
 
-    def mint_reputation_nft(self, user_id):
+    def register_user(self, username, wallet_address, email=None):
         """
-        Mint a reputation NFT for a user based on their prediction history
+        Register a new user
 
         Args:
-            user_id: User ID
+            username: User's chosen username
+            wallet_address: User's Solana wallet address
+            email: Optional email address
 
         Returns:
-            dict: Minting result
+            dict: Registration result
         """
-        logger.info(f"Minting reputation NFT for user {user_id}")
+        logger.info(f"Registering new user {username} with wallet {wallet_address}")
 
         try:
-            # Get user
-            user = self.user_repo.get_user(user_id)
+            # Check if username is already taken
+            existing_user = self.user_repo.get_user_by_username(username)
+
+            if existing_user:
+                logger.error(f"Username {username} is already taken")
+                return {
+                    "success": False,
+                    "error": "Username is already taken"
+                }
+
+            # Check if wallet address is already registered
+            existing_wallet = self.user_repo.get_user_by_wallet(wallet_address)
+
+            if existing_wallet:
+                logger.error(f"Wallet address {wallet_address} is already registered")
+                return {
+                    "success": False,
+                    "error": "Wallet address is already registered"
+                }
+
+            # Generate user ID
+            user_id = self._generate_user_id(wallet_address)
+
+            # Create user record
+            user = {
+                "user_id": user_id,
+                "username": username,
+                "wallet_address": wallet_address,
+                "email": email,
+                "created_at": datetime.now().isoformat(),
+                "last_login": None,
+                "status": "active"
+            }
+
+            # Store user
+            stored_user = self.user_repo.create_user(user)
+
+            # Create token account for the user
+            token_account = self.token_manager.create_token_account(wallet_address)
+
+            # Mint welcome tokens
+            welcome_amount = 10  # Welcome tokens
+            mint_result = self.token_manager.mint_tokens(wallet_address, welcome_amount)
+
+            # Generate authentication token
+            auth_token = generate_token(user_id)
+
+            return {
+                "success": True,
+                "user": {
+                    "user_id": user_id,
+                    "username": username,
+                    "wallet_address": wallet_address,
+                    "token_balance": welcome_amount,
+                    "created_at": user["created_at"]
+                },
+                "auth_token": auth_token,
+                "token_account": str(token_account) if token_account else None,
+                "welcome_tokens": welcome_amount,
+                "mint_transaction": mint_result
+            }
+
+        except Exception as e:
+            logger.error(f"Error registering user: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Error registering user: {str(e)}"
+            }
+
+    def login_user(self, wallet_address, signature, message):
+        """
+        Log in a user using wallet signature
+
+        Args:
+            wallet_address: User's wallet address
+            signature: Signature from wallet
+            message: Message that was signed
+
+        Returns:
+            dict: Login result
+        """
+        logger.info(f"User login attempt with wallet {wallet_address}")
+
+        try:
+            # Verify signature
+            if not verify_signature(wallet_address, signature, message):
+                logger.error(f"Invalid signature for wallet {wallet_address}")
+                return {
+                    "success": False,
+                    "error": "Invalid signature"
+                }
+
+            # Get user by wallet address
+            user = self.user_repo.get_user_by_wallet(wallet_address)
 
             if not user:
-                logger.error(f"User {user_id} not found")
+                logger.error(f"User not found for wallet {wallet_address}")
                 return {
                     "success": False,
                     "error": "User not found"
                 }
 
-            # Get user's wallet address
-            wallet_address = user["wallet_address"]
-
-            # Get user's betting history
-            bets = self.bet_repo.get_bets({"user_id": user_id}, 1000)
-
-            # Filter to settled bets
-            settled_bets = [b for b in bets if b["status"] == "settled"]
-
-            if not settled_bets:
-                logger.error(f"User {user_id} has no settled bets")
-                return {
-                    "success": False,
-                    "error": "User has no settled bets to generate reputation"
-                }
-
-            # Get prediction results
-            from db.repositories import PredictionRepository
-            prediction_repo = PredictionRepository()
-
-            prediction_results = []
-            for bet in settled_bets:
-                prediction_id = bet["prediction_id"]
-                prediction = prediction_repo.get_prediction(prediction_id)
-
-                if prediction:
-                    prediction_results.append({
-                        "prediction_id": prediction_id,
-                        "asset": prediction.get("asset", prediction.get("collection")),
-                        "prediction_type": prediction["prediction_type"],
-                        "predicted_value": prediction["predicted_value"],
-                        "actual_value": prediction.get("actual_value"),
-                        "timestamp": prediction["timestamp"],
-                        "is_correct": bet["outcome"] == "won"
-                    })
-
-            # Mint NFT
-            mint_address, tx_signature = self.nft_manager.create_prediction_nft(
-                wallet_address, prediction_results
-            )
-
-            if not mint_address:
-                logger.error("Failed to mint reputation NFT")
-                return {
-                    "success": False,
-                    "error": "Failed to mint NFT"
-                }
-
-            # Get NFT metadata
-            metadata = self.nft_manager.get_nft_metadata(mint_address)
-
-            # Store NFT record in user's account
-            user_nfts = user.get("reputation_nfts", [])
-            user_nfts.append({
-                "mint_address": mint_address,
-                "mint_transaction": tx_signature,
-                "created_at": datetime.now().isoformat(),
-                "prediction_count": len(prediction_results),
-                "accuracy": metadata.get("attributes", {}).get("Accuracy", "0%")
+            # Update last login
+            self.user_repo.update_user(user["user_id"], {
+                "last_login": datetime.now().isoformat()
             })
 
-            self.user_repo.update_user(user_id, {
-                "reputation_nfts": user_nfts
-            })
+            # Generate authentication token
+            auth_token = generate_token(user["user_id"])
+
+            # Get token balance
+            token_balance = self.token_manager.get_token_balance(wallet_address)
 
             return {
                 "success": True,
-                "nft": {
-                    "mint_address": mint_address,
-                    "transaction": tx_signature,
-                    "metadata": metadata
-                }
+                "user": {
+                    "user_id": user["user_id"],
+                    "username": user["username"],
+                    "wallet_address": wallet_address,
+                    "token_balance": token_balance,
+                    "created_at": user["created_at"],
+                    "last_login": datetime.now().isoformat()
+                },
+                "auth_token": auth_token
             }
 
         except Exception as e:
-            logger.error(f"Error minting reputation NFT: {str(e)}")
+            logger.error(f"Error logging in user: {str(e)}")
             return {
                 "success": False,
-                "error": f"Error minting reputation NFT: {str(e)}"
+                "error": f"Error logging in user: {str(e)}"
             }
 
-    def get_user_nfts(self, user_id):
+    def get_user(self, user_id):
         """
-        Get a user's reputation NFTs
+        Get user by ID
 
         Args:
             user_id: User ID
 
         Returns:
-            list: List of NFTs
+            dict: User details
         """
-        # Get user
+        user = self.user_repo.get_user(user_id)
+
+        if not user:
+            return None
+
+        # Get token balance
+        token_balance = self.token_manager.get_token_balance(user["wallet_address"])
+
+        # Add balance to user details
+        user["token_balance"] = token_balance
+
+        return user
+
+    def get_balance(self, user_id):
+        """
+        Get user's token balance
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            float: Token balance
+        """
+        user = self.user_repo.get_user(user_id)
+
+        if not user:
+            return None
+
+        return self.token_manager.get_token_balance(user["wallet_address"])
+
+    def get_user_stats(self, user_id):
+        """
+        Get user statistics
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            dict: User statistics
+        """
+        user = self.user_repo.get_user(user_id)
+
+        if not user:
+            return None
+
+        # Get user's bets and predictions
+        from db.repositories import BetRepository, PredictionRepository
+        bet_repo = BetRepository()
+        prediction_repo = PredictionRepository()
+
+        bets = bet_repo.get_bets({"user_id": user_id}, 1000)
+
+        # Calculate betting stats
+        total_bets = len(bets)
+        active_bets = sum(1 for b in bets if b["status"] == "placed")
+        won_bets = sum(1 for b in bets if b.get("outcome") == "won")
+        lost_bets = sum(1 for b in bets if b.get("outcome") == "lost")
+        win_rate = won_bets / total_bets * 100 if total_bets > 0 else 0
+
+        # Calculate amount stats
+        total_bet_amount = sum(b["amount"] for b in bets)
+        total_rewards = sum(b.get("reward_amount", 0) for b in bets if b.get("outcome") == "won")
+        net_profit = total_rewards - total_bet_amount
+
+        # Get token balance
+        token_balance = self.token_manager.get_token_balance(user["wallet_address"])
+
+        return {
+            "user_id": user_id,
+            "username": user["username"],
+            "wallet_address": user["wallet_address"],
+            "token_balance": token_balance,
+            "created_at": user["created_at"],
+            "last_login": user.get("last_login"),
+            "betting_stats": {
+                "total_bets": total_bets,
+                "active_bets": active_bets,
+                "won_bets": won_bets,
+                "lost_bets": lost_bets,
+                "win_rate": win_rate,
+                "total_bet_amount": total_bet_amount,
+                "total_rewards": total_rewards,
+                "net_profit": net_profit
+            }
+        }
+
+    def get_user_count(self):
+        """
+        Get total number of users
+
+        Returns:
+            int: Total user count
+        """
+        return self.user_repo.get_count()
+
+    def update_user(self, user_id, updates):
+        """
+        Update user details
+
+        Args:
+            user_id: User ID
+            updates: Fields to update
+
+        Returns:
+            dict: Updated user
+        """
+        # Verify user exists
         user = self.user_repo.get_user(user_id)
 
         if not user:
             logger.error(f"User {user_id} not found")
-            return []
+            return None
 
-        # Get user's wallet address
-        wallet_address = user["wallet_address"]
+        # Apply updates
+        updated_user = self.user_repo.update_user(user_id, updates)
 
-        # Get NFTs from blockchain
-        nfts = self.nft_manager.get_user_nfts(wallet_address)
+        return updated_user
 
-        return nfts
-
-    def get_nft_count(self):
+    def _generate_user_id(self, wallet_address):
         """
-        Get total number of reputation NFTs
-
-        Returns:
-            int: Total NFT count
-        """
-        # In a real implementation, this would query a database
-        # Here we'll just count NFTs across all users
-        users = self.user_repo.get_users({}, 1000)
-
-        total_nfts = sum(len(user.get("reputation_nfts", [])) for user in users)
-
-        return total_nfts
-
-    def get_leaderboard(self, time_period="all_time", limit=50):
-        """
-        Get reputation leaderboard
+        Generate a user ID based on wallet address
 
         Args:
-            time_period: Time period filter ("all_time", "month", "week", "day")
-            limit: Maximum number of results
+            wallet_address: User's wallet address
 
         Returns:
-            list: Leaderboard entries
+            str: User ID
         """
-        # Get all users
-        users = self.user_repo.get_users({}, 1000)
+        # Create a hash of the wallet address
+        hash_input = f"{wallet_address}:{datetime.now().isoformat()}"
+        hash_bytes = hashlib.sha256(hash_input.encode()).digest()
 
-        # Calculate date range based on time period
-        end_date = datetime.now()
+        # Use the first 16 bytes as a user ID
+        user_id = base64.urlsafe_b64encode(hash_bytes[:16]).decode().rstrip("=")
 
-        if time_period == "month":
-            start_date = end_date - timedelta(days=30)
-        elif time_period == "week":
-            start_date = end_date - timedelta(days=7)
-        elif time_period == "day":
-            start_date = end_date - timedelta(days=1)
-        else:
-            # All time
-            start_date = None
-
-        # Get settled bets for each user
-        bet_repo = BetRepository()
-
-        leaderboard = []
-        for user in users:
-            user_id = user["user_id"]
-            username = user["username"]
-
-            # Get user's bets
-            filters = {"user_id": user_id, "status": "settled"}
-
-            if start_date:
-                filters["timestamp_after"] = start_date.isoformat()
-
-            bets = bet_repo.get_bets(filters, 1000)
-
-            if not bets:
-                continue
-
-            # Calculate reputation stats
-            total_bets = len(bets)
-            won_bets = sum(1 for b in bets if b.get("outcome") == "won")
-            accuracy = won_bets / total_bets if total_bets > 0 else 0
-
-            # Calculate reputation score
-            # Formula: (wins * 10) + (accuracy * 100) + (total_bets * 0.5)
-            reputation_score = (won_bets * 10) + (accuracy * 100) + (total_bets * 0.5)
-
-            # Determine rank based on accuracy and total predictions
-            rank = self._calculate_rank(accuracy, total_bets)
-
-            leaderboard.append({
-                "user_id": user_id,
-                "username": username,
-                "total_predictions": total_bets,
-                "correct_predictions": won_bets,
-                "accuracy": accuracy * 100,  # as percentage
-                "reputation_score": reputation_score,
-                "rank": rank,
-                "nft_count": len(user.get("reputation_nfts", []))
-            })
-
-        # Sort by reputation score
-        leaderboard.sort(key=lambda x: x["reputation_score"], reverse=True)
-
-        # Apply limit
-        return leaderboard[:limit]
-
-    def _calculate_rank(self, accuracy, total_predictions):
-        """
-        Calculate user rank based on performance
-
-        Args:
-            accuracy: Prediction accuracy (0-1)
-            total_predictions: Total number of predictions
-
-        Returns:
-            str: Rank title
-        """
-        if total_predictions < 5:
-            return "Novice"
-        elif accuracy < 0.5:
-            return "Apprentice"
-        elif accuracy < 0.6:
-            return "Adept"
-        elif accuracy < 0.7:
-            return "Expert"
-        elif accuracy < 0.8:
-            return "Master"
-        else:
-            return "Oracle"
+        return f"user_{user_id}"
